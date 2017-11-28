@@ -12,7 +12,7 @@ import voluptuous as vol
 
 import homeassistant.helpers.config_validation as cv
 from homeassistant import const as ha_const
-from homeassistant.const import (CONF_HOST, CONF_API_KEY)
+from homeassistant.const import (CONF_HOST, CONF_PORT, CONF_API_KEY)
 from homeassistant.helpers import discovery, entity
 from .components import component
 
@@ -20,7 +20,6 @@ REQUIREMENTS = ['websockets>=4', 'aiohttp>=2.3', 'async_timeout>=2']
 
 DOMAIN = 'dcz'
 
-CONF_WEBSOCKET = 'websocket'
 CONF_DEVICE_CONFIG = 'device_config'
 DATA_API = 'dcz_api'
 ATTR_DURATION = 'duration'
@@ -33,7 +32,7 @@ DEVICE_CONFIG_SCHEMA_ENTRY = vol.Schema({
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
         vol.Required(CONF_HOST): cv.string,
-        vol.Required(CONF_WEBSOCKET): cv.string,
+        vol.Optional(CONF_PORT, default=80): cv.positive_int,
         vol.Required(CONF_API_KEY): cv.string,
         vol.Optional(CONF_DEVICE_CONFIG, default={}):
             vol.Schema({cv.string: DEVICE_CONFIG_SCHEMA_ENTRY}),
@@ -209,7 +208,8 @@ class DeCONZApi:
             if dclass in self._devices and device_id in self._devices[dclass]:
                 device = self._devices[dclass][device_id]
             else:
-                device = yield from self._find_unknown_device(dclass, device_id)
+                device = yield from self._find_unknown_device(dclass,
+                                                              device_id)
             if not device:
                 _LOGGER.info("Unable to determine device.")
                 return
@@ -223,11 +223,19 @@ class DeCONZApi:
         """Read and parse websocket."""
         import websockets
 
+        conf = yield from self.get('config')
+        if conf:
+            ws_port = conf.get('websocketport', 443)
+        else:
+            ws_port = 443
+
+        ws_url = 'ws://{}:{}'.format(self._config[DOMAIN][CONF_HOST], ws_port)
+
+        _LOGGER.info("Connecting to websocket on: %s", ws_url)
+
         while not self._dying:
             try:
-                tasks = []
-                socket = yield from websockets.connect(
-                    'ws://{}'.format(self._config[DOMAIN][CONF_WEBSOCKET]))
+                socket = yield from websockets.connect(ws_url)
                 while True:
                     raw = None
                     try:
@@ -265,8 +273,9 @@ class DeCONZApi:
 
     def _http_address(self, node):
         """Return a http address to given REST node."""
-        return "http://{}/api/{}/{}".format(
+        return "http://{}:{}/api/{}/{}".format(
             self._config[DOMAIN][CONF_HOST],
+            self._config[DOMAIN][CONF_PORT],
             self._config[DOMAIN][CONF_API_KEY],
             node)
 

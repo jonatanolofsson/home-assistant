@@ -179,13 +179,14 @@ class DeCONZApi:
         result = False
         if comp:
             uid = device['uniqueid']
-            future = self._hass.loop.create_future()
-            self._futures[uid] = future
-            self._hass.async_add_job(discovery.async_load_platform(
-                self._hass, comp, DOMAIN,
-                ('sensors', device_id, device), self._config))
+            if uid not in self._futures:
+                future = self._hass.loop.create_future()
+                self._futures[uid] = future
+                self._hass.async_add_job(discovery.async_load_platform(
+                    self._hass, comp, DOMAIN,
+                    ('sensors', device_id, device), self._config))
             try:
-                result = yield from asyncio.wait_for(future, 10)
+                result = yield from asyncio.wait_for(self._futures[uid], 10)
             except asyncio.TimeoutError:
                 result = False
         return result

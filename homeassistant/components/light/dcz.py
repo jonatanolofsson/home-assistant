@@ -16,6 +16,7 @@ from homeassistant.components.light import (
     SUPPORT_EFFECT, SUPPORT_FLASH, SUPPORT_RGB_COLOR, SUPPORT_TRANSITION,
     SUPPORT_XY_COLOR)
 from homeassistant.components import light
+from homeassistant.components.light import DOMAIN
 import homeassistant.util.color as color_util
 from homeassistant.const import STATE_ON, STATE_OFF
 
@@ -41,6 +42,7 @@ SUPPORT_EXTENDED = (SUPPORT_COLOR_TEMP | SUPPORT_COLOR)
 
 SUPPORTED_TYPES = {
     'Extended color light': SUPPORT_EXTENDED,
+    'Color temperature light': SUPPORT_COLOR_TEMP,
     'Color light': SUPPORT_COLOR,
     'Dimmable light': SUPPORT_DIMMABLE,
     'On/Off plug-in unit': SUPPORT_ON_OFF,
@@ -51,31 +53,26 @@ SUPPORTED_TYPES = {
 class Light(dcz.Entity, light.Light):
     """deCONZ light entity."""
 
-    _domain = light.DOMAIN
+    _domain = DOMAIN
 
-    def __init(self, hass, config, dclass, device_id, device):
+    def __init__(self, hass, config, dclass, device_id, device):
         """Init deCONZ light."""
         super().__init__(hass, config, dclass, device_id, device)
 
         dtype = None
-        if CONF_DEVICE_CONFIG in config[dcz.DOMAIN] and 'uniqueid' in device:
-            uid = device['uniqueid']
-            cfg = config[dcz.DOMAIN][CONF_DEVICE_CONFIG].get(uid)
-            if cfg and 'type' in cfg and cfg['type'] in SUPPORTED_TYPES:
-                dtype = cfg['type']
+        uid = device.get('uniqueid')
+        dtype = config.get(DOMAIN, {}).get(CONF_DEVICE_CONFIG, {}) \
+            .get(uid, {}).get('type')
         if dtype is None:
-            if device.get('type') in SUPPORTED_TYPES:
-                dtype = device.get('type')
+            dtype = device.get('type')
 
-        if dtype is not None:
+        if dtype in SUPPORTED_TYPES:
             self._supported_features = SUPPORTED_TYPES[dtype]
         else:
             self._supported_features |= SUPPORT_BRIGHTNESS
             self._supported_features |= SUPPORT_TRANSITION
             if device.get('hascolor'):
                 self._supported_features |= SUPPORT_COLOR_TEMP
-
-        self._state = {'on': None}
 
     @asyncio.coroutine
     def async_turn_on(self, **kwargs):

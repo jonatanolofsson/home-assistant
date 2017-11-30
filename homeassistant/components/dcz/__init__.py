@@ -40,7 +40,7 @@ CONFIG_SCHEMA = vol.Schema({
 }, extra=vol.ALLOW_EXTRA)
 
 SERVICE_PERMIT = 'permit'
-SERVICE_OTAU = 'permit'
+SERVICE_OTAU = 'otau'
 SERVICE_DESCRIPTIONS = {
     SERVICE_PERMIT: {
         "description": "Allow nodes to join the ZigBee network",
@@ -74,13 +74,7 @@ def async_setup(hass, config):
     api = DeCONZApi(hass, config)
     hass.data[DATA_API] = api
 
-    for dclass in ['sensors', 'lights']:
-        devices = yield from api.get(dclass)
-        for device_id, device in devices.items():
-            comp = component(config, dclass, device)
-            if comp:
-                hass.async_add_job(discovery.async_load_platform(
-                    hass, comp, DOMAIN, (dclass, device_id, device), config))
+    asyncio.ensure_future(api.refresher_task(hass, config))
 
     @asyncio.coroutine
     def permit(service):
@@ -151,7 +145,7 @@ class DeCONZApi:
 
         if dclass not in self._devices:
             self._devices[dclass] = {}
-        if obj.id in self._devices[dclass]:
+        if self._devices[dclass].get(obj.id) is not None:
             _LOGGER.warning("Duplicate init")
             return
         self._devices[dclass][obj.id] = obj
@@ -174,6 +168,9 @@ class DeCONZApi:
         _LOGGER.debug("Finding unknown device: [%s][%s]", dclass, device_id)
         if not dclass or not device_id:
             return None
+        if dclass not in self._devices:
+            self._devices[dclass] = {}
+        self._devices[dclass][device_id] = None
         device = yield from self.get('{}/{}'.format(dclass, device_id))
         comp = component(self._config, dclass, device)
         result = False
@@ -212,7 +209,7 @@ class DeCONZApi:
                 device = yield from self._find_unknown_device(dclass,
                                                               device_id)
             if not device:
-                _LOGGER.info("Unable to determine device.")
+                _LOGGER.info("Unable to determine device: (%s : %s).", dclass, device_id)
                 return
 
             yield from device.handle_message(message)
@@ -320,6 +317,24 @@ class DeCONZApi:
     def post(self, node, data):
         """HTTP POST request."""
         return (yield from self._req(self._http.post, node, data))
+
+    @asyncio.coroutine
+    def refresher_task(self, hass, config):
+        """Refresh connected devices."""
+        while True:
+            for dclass in ['sensors', 'lights']:
+                if dclass not in self._devices:
+                    self._devices[dclass] = {}
+                devices = yield from self.get(dclass)
+                for device_id, device in devices.items():
+                    if device_id not in self._devices[dclass]:
+                        self._devices[dclass][device_id] = None
+                        comp = component(config, dclass, device)
+                        if comp:
+                            hass.async_add_job(discovery.async_load_platform(
+                                hass, comp, DOMAIN,
+                                (dclass, device_id, device), config))
+            asyncio.sleep(5)
 
 
 class Entity(entity.Entity):
